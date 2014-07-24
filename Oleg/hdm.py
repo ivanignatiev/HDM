@@ -150,12 +150,12 @@ class Logger(threading.Thread):
 
     def run(self):
         self.canRun = True
-        sniff(prn=self.parsePacket, filter="tcp", store=0, stopperTimeout=1, stopper=self.stopper)
+        sniff(prn=self.parsePacket, store=0, stopperTimeout=1, stopper=self.stopper)
 
     def parsePacket(self, pkt):
         # test(pkt)
         # exit(0)
-        print pkt.show()
+        print pkt.summary()
         mac = pkt.sprintf("%Ether.src%")
         fileName = "./logs/" + mac.replace(':', '_')
         logFile = open(fileName, 'a+')
