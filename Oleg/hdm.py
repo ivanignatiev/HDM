@@ -298,7 +298,7 @@ def main(args):
     print "attackerIP:", attackerIP
     def signal_handler(signal, frame):
         print ""
-        # restore(routerIP, victimIP, routerMAC, victimMAC)
+        restore(routerIP, victimIP, routerMAC, victimMAC)
         log.stop(); # stop thread
         poi.stop(); # stop poisoner
         edi.stop(); # stop thread
