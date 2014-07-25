@@ -56,3 +56,6 @@ timezone: Europe/Paris
 host-only adapter:
 ip: 192.168.10.3
 mask: 255.255.255.0
+
+mongodb (pymongo)
+scapy

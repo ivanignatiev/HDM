@@ -1,0 +1,23 @@
+kernel:
+    modules: [ telnet, poison, traffic ]
+    invoke_delay: 0.01
+logger:
+    level: 0
+database:
+    name: mitm
+    connection:
+        host: localhost
+        port: 27017
+telnet:
+    commands: [ addtask, poisonstart, poisonstop ]
+    host: localhost
+    port: 23
+poison:
+    victim: 192.168.10.2
+    gateway: 192.168.10.1
+    delay: 1.5
+traffic:
+    plugins: [ logger ]
+    processing_count: 5
+    delay: 0.01
+    allow_dublicates: True
