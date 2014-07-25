@@ -82,10 +82,11 @@ class mitm(object):
                     mod.invoke()
                 time.sleep(self.config.get("kernel").get("invoke_delay"))
         except KeyboardInterrupt:
+            self.log.info("mitm is going to stop")
             for mod in self.mod_classes:
                 mod.close()
 
-        self.log.info("mitm stoped")
+        self.log.info("mitm has downed")
 
 if __name__ == "__main__":
     mitm(mitmargs().get_args()).run()
